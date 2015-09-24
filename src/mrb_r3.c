@@ -12,17 +12,23 @@
 #include "mruby.h"
 #include "mruby/data.h"
 #include "mruby/string.h"
+#include "mruby/class.h"
+#include "mruby/array.h"
 #include "mrb_r3.h"
 #include "r3.h"
 
 #define DONE mrb_gc_arena_restore(mrb, 0);
 
+void mrb_r3_match_free(mrb_state *mrb, void *match);
+const static struct mrb_data_type mrb_r3_match_type = { "R3::Match", mrb_r3_match_free };
+
 mrb_value mrb_r3_tree_initialize(mrb_state *mrb, mrb_value self)
 {
     mrb_value cap;
+    DATA_PTR(self) = NULL;
     mrb_get_args(mrb, "i", &cap);
-
     DATA_PTR(self) = r3_tree_create(mrb_fixnum(cap));
+
     return self;
 }
 
@@ -53,16 +59,20 @@ mrb_value mrb_r3_tree_compile(mrb_state *mrb, mrb_value self)
 mrb_value mrb_r3_tree_match(mrb_state *mrb, mrb_value self)
 {
     node *tree;
-    mrb_value method, path, data;
-    match_entry *entry;
+    mrb_value method, path;
+    match_entry *match;
     tree = DATA_PTR(self);
     mrb_get_args(mrb, "iS", &method, &path);
 
-    entry = match_entry_create(mrb_str_to_cstr(mrb, path));
-    entry->request_method = mrb_fixnum(method);
-    data = mrb_obj_value(r3_tree_match_route(tree, entry)->data);
-    match_entry_free(entry);
-    return data;
+    match = match_entry_create(mrb_str_to_cstr(mrb, path));
+    match->request_method = mrb_fixnum(method);
+
+    r3_tree_match_entry(tree, match);
+    return mrb_obj_value(Data_Wrap_Struct(
+            mrb,
+            mrb_class_get_under(mrb, mrb_module_get(mrb, "R3"), "Match"),
+            &mrb_r3_match_type,
+            match));
 }
 
 mrb_value mrb_r3_tree_dump(mrb_state *mrb, mrb_value self)
@@ -73,10 +83,45 @@ mrb_value mrb_r3_tree_dump(mrb_state *mrb, mrb_value self)
     return mrb_nil_value();
 }
 
+mrb_value mrb_r3_match_initialize(mrb_state *mrb, mrb_value self)
+{
+    match_entry *match;
+
+    match = (match_entry *) mrb_malloc(mrb, sizeof(match_entry));
+    DATA_TYPE(self) = &mrb_r3_match_type;
+    DATA_PTR(self) = match;
+    return self;
+}
+
+mrb_value mrb_r3_match_request_method(mrb_state *mrb, mrb_value self)
+{
+    match_entry *match;
+    match = DATA_PTR(self);
+    return mrb_fixnum_value(match->request_method);
+}
+
+mrb_value mrb_r3_match_params(mrb_state *mrb, mrb_value self)
+{
+    int i;
+    match_entry *match;
+    mrb_value params;
+    match = DATA_PTR(self);
+
+    params = mrb_ary_new(mrb);
+    for (i = 0; i < match->vars->len; i++) {
+        mrb_ary_push(mrb, params, mrb_str_new_cstr(mrb, match->vars->tokens[i]));
+    }
+    return params;
+}
+
+void mrb_r3_match_free(mrb_state *mrb, void *match)
+{
+    match_entry_free((match_entry *) match);
+}
 
 void mrb_mruby_r3_gem_init(mrb_state *mrb)
 {
-    struct RClass *r3, *method, *tree;
+    struct RClass *r3, *method, *tree, *match;
 
     r3 = mrb_define_module(mrb, "R3");
 
@@ -95,6 +140,12 @@ void mrb_mruby_r3_gem_init(mrb_state *mrb)
     mrb_define_method(mrb, tree, "dump", mrb_r3_tree_dump, MRB_ARGS_NONE());
     mrb_define_method(mrb, tree, "insert_route", mrb_r3_tree_insert_route, MRB_ARGS_REQ(3));
     mrb_define_method(mrb, tree, "match", mrb_r3_tree_match, MRB_ARGS_REQ(2));
+
+    match = mrb_define_class_under(mrb, r3, "Match", mrb->object_class);
+    MRB_SET_INSTANCE_TT(match, MRB_TT_DATA);
+    mrb_define_method(mrb, match, "initialize", mrb_r3_match_initialize, MRB_ARGS_NONE());
+    mrb_define_method(mrb, match, "request_method", mrb_r3_match_request_method, MRB_ARGS_NONE());
+    mrb_define_method(mrb, match, "params", mrb_r3_match_params, MRB_ARGS_NONE());
 
     DONE;
 }
