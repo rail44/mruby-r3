@@ -20,7 +20,12 @@
 #define DONE mrb_gc_arena_restore(mrb, 0);
 
 void mrb_r3_match_free(mrb_state *mrb, void *match);
-const static struct mrb_data_type mrb_r3_match_type = { "R3::Match", mrb_r3_match_free };
+const static struct mrb_data_type mrb_r3_match_type = { "R3::Match", mrb_free };
+
+typedef struct {
+    mrb_value params;
+    mrb_value data;
+} mrb_r3_match_struct;
 
 mrb_value mrb_r3_tree_initialize(mrb_state *mrb, mrb_value self)
 {
@@ -34,23 +39,21 @@ mrb_value mrb_r3_tree_initialize(mrb_state *mrb, mrb_value self)
 
 mrb_value mrb_r3_tree_insert_route(mrb_state *mrb, mrb_value self)
 {
-    node *tree;
     mrb_value method, path, data;
-    tree = DATA_PTR(self);
+    node *tree = DATA_PTR(self);
     mrb_get_args(mrb, "iSo", &method, &path, &data);
 
     r3_tree_insert_route(tree,
                          mrb_fixnum(method),
                          mrb_str_to_cstr(mrb, path),
-                         mrb_obj_ptr(data));
+                         mrb_ptr(data));
     return mrb_nil_value();
 }
 
 mrb_value mrb_r3_tree_compile(mrb_state *mrb, mrb_value self)
 {
-    node *tree;
     char *errstr = NULL;
-    tree = DATA_PTR(self);
+    node *tree = DATA_PTR(self);
 
     r3_tree_compile(tree, &errstr);
     return mrb_str_new_cstr(mrb, errstr);
@@ -58,16 +61,29 @@ mrb_value mrb_r3_tree_compile(mrb_state *mrb, mrb_value self)
 
 mrb_value mrb_r3_tree_match(mrb_state *mrb, mrb_value self)
 {
-    node *tree;
+    int i;
     mrb_value method, path;
-    match_entry *match;
-    tree = DATA_PTR(self);
+    route *matched_route;
+    mrb_r3_match_struct *match = (mrb_r3_match_struct *) mrb_malloc(mrb, sizeof(mrb_r3_match_struct));
+    node *tree = DATA_PTR(self);
+    match_entry *entry;
     mrb_get_args(mrb, "iS", &method, &path);
 
-    match = match_entry_create(mrb_str_to_cstr(mrb, path));
-    match->request_method = mrb_fixnum(method);
+    entry =  match_entry_create(mrb_str_to_cstr(mrb, path));
+    entry->request_method = mrb_fixnum(method);
 
-    r3_tree_match_entry(tree, match);
+    matched_route = r3_tree_match_route(tree, entry);
+    if (matched_route == NULL) {
+        match->data = mrb_nil_value();
+    } else { 
+        match->data = mrb_obj_value(matched_route->data);
+    }
+    match->params = mrb_ary_new(mrb);
+    for (i = 0; i < entry->vars->len; i++) {
+        mrb_ary_push(mrb, match->params, mrb_str_new_cstr(mrb, entry->vars->tokens[i]));
+    }
+    match_entry_free(entry);
+
     return mrb_obj_value(Data_Wrap_Struct(
             mrb,
             mrb_class_get_under(mrb, mrb_module_get(mrb, "R3"), "Match"),
@@ -77,46 +93,29 @@ mrb_value mrb_r3_tree_match(mrb_state *mrb, mrb_value self)
 
 mrb_value mrb_r3_tree_dump(mrb_state *mrb, mrb_value self)
 {
-    node *tree;
-    tree = DATA_PTR(self);
+    node *tree = DATA_PTR(self);
     r3_tree_dump(tree, 0);
     return mrb_nil_value();
 }
 
 mrb_value mrb_r3_match_initialize(mrb_state *mrb, mrb_value self)
 {
-    match_entry *match;
-
-    match = (match_entry *) mrb_malloc(mrb, sizeof(match_entry));
+    mrb_r3_match_struct *match = (mrb_r3_match_struct *) mrb_malloc(mrb, sizeof(mrb_r3_match_struct));
     DATA_TYPE(self) = &mrb_r3_match_type;
     DATA_PTR(self) = match;
     return self;
 }
 
-mrb_value mrb_r3_match_request_method(mrb_state *mrb, mrb_value self)
-{
-    match_entry *match;
-    match = DATA_PTR(self);
-    return mrb_fixnum_value(match->request_method);
-}
-
 mrb_value mrb_r3_match_params(mrb_state *mrb, mrb_value self)
 {
-    int i;
-    match_entry *match;
-    mrb_value params;
-    match = DATA_PTR(self);
-
-    params = mrb_ary_new(mrb);
-    for (i = 0; i < match->vars->len; i++) {
-        mrb_ary_push(mrb, params, mrb_str_new_cstr(mrb, match->vars->tokens[i]));
-    }
-    return params;
+    mrb_r3_match_struct *match = DATA_PTR(self);
+    return match->params;
 }
 
-void mrb_r3_match_free(mrb_state *mrb, void *match)
+mrb_value mrb_r3_match_data(mrb_state *mrb, mrb_value self)
 {
-    match_entry_free((match_entry *) match);
+    mrb_r3_match_struct *match = DATA_PTR(self);
+    return match->data;
 }
 
 void mrb_mruby_r3_gem_init(mrb_state *mrb)
@@ -143,9 +142,8 @@ void mrb_mruby_r3_gem_init(mrb_state *mrb)
 
     match = mrb_define_class_under(mrb, r3, "Match", mrb->object_class);
     MRB_SET_INSTANCE_TT(match, MRB_TT_DATA);
-    mrb_define_method(mrb, match, "initialize", mrb_r3_match_initialize, MRB_ARGS_NONE());
-    mrb_define_method(mrb, match, "request_method", mrb_r3_match_request_method, MRB_ARGS_NONE());
     mrb_define_method(mrb, match, "params", mrb_r3_match_params, MRB_ARGS_NONE());
+    mrb_define_method(mrb, match, "data", mrb_r3_match_data, MRB_ARGS_NONE());
 
     DONE;
 }
