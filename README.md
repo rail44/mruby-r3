@@ -21,21 +21,21 @@ tree.insert_route(Method::POST, "/fuga/{i}", "5678")
 tree.compile
 
 match1 = tree.match(Method::GET, "/hoge")
-p match1.params
+p match1[:params]
 #=> []
-p match1.data
+p match1[:data]
 #=> {:hoge=>"hogehoge"}
 
 match2 = tree.match(Method::POST, "/fuga/1234")
-p match2.params
+p match2[:params]
 #=> ["1234"]
-p match2.data
+p match2[:data]
 #=> "5678"
 
 match3 = tree.match(Method::POST, "/hoge")
-p match3.params
+p match3[:params]
 #=> []
-p match3.data
+p match3[:data]
 #=> nil
 ```
 
