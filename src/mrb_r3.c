@@ -32,7 +32,7 @@ mrb_value mrb_r3_tree_initialize(mrb_state *mrb, mrb_value self)
 mrb_value mrb_r3_tree_insert_route(mrb_state *mrb, mrb_value self)
 {
     mrb_value method, path, data;
-    node *tree = DATA_PTR(self);
+    R3Node *tree = DATA_PTR(self);
     mrb_get_args(mrb, "iSo", &method, &path, &data);
 
     r3_tree_insert_route(tree,
@@ -45,7 +45,7 @@ mrb_value mrb_r3_tree_insert_route(mrb_state *mrb, mrb_value self)
 mrb_value mrb_r3_tree_compile(mrb_state *mrb, mrb_value self)
 {
     char *errstr = NULL;
-    node *tree = DATA_PTR(self);
+    R3Node *tree = DATA_PTR(self);
 
     r3_tree_compile(tree, &errstr);
     return mrb_str_new_cstr(mrb, errstr);
@@ -61,8 +61,8 @@ mrb_value mrb_r3_tree_match(mrb_state *mrb, mrb_value self)
               params_key,
               params_value;
     match_entry *entry;
-    route *matched_route;
-    node *tree = DATA_PTR(self);
+    R3Route *matched_route;
+    R3Node *tree = DATA_PTR(self);
     mrb_get_args(mrb, "iS", &method, &path);
 
     match = mrb_hash_new(mrb);
